@@ -403,7 +403,7 @@ int main(int argc, char* argv[]) {
 		: 0.f;
 	const int playersPerTeam = runtime.mode == Carnage::Training::GameMode::TwoVTwo ? 2 : 1;
 
-	RG_LOG("Carnage-Lite (1.2M)");
+	RG_LOG("Carnage-Lite (4.5M)");
 	RG_LOG("Mode: " << ModeName(runtime.mode) << " | phase: " << phase
 		<< " | checkpoint step: " << latestCheckpoint
 		<< " | initial team spirit: " << initialTeamSpirit);
@@ -469,8 +469,8 @@ int main(int argc, char* argv[]) {
 	config.ppo.policyLR = policyLROverride > 0 ? policyLROverride : phaseSettings.policyLR;
 	config.ppo.criticLR = config.ppo.policyLR;
 	config.ppo.sharedHead = {};
-	config.ppo.policy.layerSizes = { 512, 512, 512 };
-	config.ppo.critic.layerSizes = { 512, 512, 512 };
+	config.ppo.policy.layerSizes = { 1024, 1024, 1024 };
+	config.ppo.critic.layerSizes = { 1024, 1024, 1024 };
 	config.ppo.policy.addLayerNorm = true;
 	config.ppo.critic.addLayerNorm = true;
 	config.ppo.policy.activationType = ModelActivationType::RELU;
