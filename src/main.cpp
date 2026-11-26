@@ -461,7 +461,7 @@ int main(int argc, char* argv[]) {
 	config.ppo.tsPerItr = phaseSettings.timestepsPerIteration;
 	config.ppo.batchSize = phaseSettings.timestepsPerIteration;
 	config.ppo.miniBatchSize = phaseSettings.miniBatchSize;
-	config.ppo.epochs = 2;
+	config.ppo.epochs = 10;
 	config.ppo.entropyScale = 0.01f;
 	config.ppo.clipRange = 0.2f;
 	config.ppo.gaeGamma = phaseSettings.gamma;
