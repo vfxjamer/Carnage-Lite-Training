@@ -40,6 +40,7 @@ namespace GGL {
 
 		Learner(RLGC::EnvCreateFn envCreateFunc, LearnerConfig config, StepCallbackFn stepCallback = NULL);
 		void Start();
+		uint64_t GetModelParameterCount() const;
 
 		void StartTransferLearn(const TransferLearnConfig& transferLearnConfig);
 

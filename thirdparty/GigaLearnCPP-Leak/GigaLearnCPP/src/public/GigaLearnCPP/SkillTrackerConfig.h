@@ -20,6 +20,9 @@ namespace GGL {
 		// Number of iterations between running skill rating games
 		int updateInterval = 16;
 
+		// If true, run skill matches whenever a new policy version is saved.
+		bool updateOnNewVersion = false;
+
 		// Rating increment scale per-goal
 		float ratingInc = 5; 
 

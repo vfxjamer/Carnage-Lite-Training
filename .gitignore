@@ -8,3 +8,7 @@ __pycache__/
 *.user
 .Rhistory
 .ipynb_checkpoints/
+.env
+.env.*
+!.env.example
+wandb/

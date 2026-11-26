@@ -6,6 +6,7 @@
 #include <torch/cuda.h>
 #include <nlohmann/json.hpp>
 #include <pybind11/embed.h>
+#include <csignal>
 
 #ifdef RG_CUDA_SUPPORT
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -19,6 +20,14 @@
 #include "Util/AvgTracker.h"
 
 using namespace RLGC;
+
+namespace {
+	volatile std::sig_atomic_t gTrainingStopSignal = 0;
+
+	void HandleTrainingStopSignal(int signalValue) {
+		gTrainingStopSignal = signalValue;
+	}
+}
 
 GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbackFn stepCallback) :
 	envCreateFn(envCreateFn), config(config), stepCallback(stepCallback)
@@ -141,6 +150,12 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 			RG_ERR_CLOSE("Cannot save/load old policy versions with no checkpoint save folder");
 		auto models = ppo->GetPolicyModels();
 		versionMgr->LoadVersions(models, totalTimesteps);
+		const bool checkpointVersionIsMissing = !versionMgr->versions.empty()
+			&& versionMgr->versions.back().timesteps < totalTimesteps
+			&& versionMgr->HasPendingVersionRating(totalTimesteps);
+		if (versionMgr->versions.empty() || checkpointVersionIsMissing)
+			versionMgr->AddVersion(ppo->GetPolicyModels(), totalTimesteps);
+		versionMgr->ApplyPendingVersionRatings();
 	}
 
 	if (config.sendMetrics && !config.renderMode) {
@@ -152,6 +167,13 @@ GGL::Learner::Learner(EnvCreateFn envCreateFn, LearnerConfig config, StepCallbac
 	}
 
 	RG_LOG(RG_DIVIDER);
+}
+
+uint64_t GGL::Learner::GetModelParameterCount() const {
+	uint64_t parameterCount = 0;
+	for (Model* model : ppo->models)
+		parameterCount += model->GetParamCount();
+	return parameterCount;
 }
 
 void GGL::Learner::SaveStats(std::filesystem::path path) {
@@ -216,11 +238,17 @@ void GGL::Learner::Save() {
 		RG_ERR_CLOSE("Learner::Save(): Cannot save because config.checkpointSaveFolder is not set");
 
 	std::filesystem::path saveFolder = config.checkpointFolder / std::to_string(totalTimesteps);
-	std::filesystem::create_directories(saveFolder);
+	std::filesystem::path tempSaveFolder = config.checkpointFolder / (std::to_string(totalTimesteps) + ".tmp");
+	if (std::filesystem::exists(tempSaveFolder))
+		std::filesystem::remove_all(tempSaveFolder);
+	std::filesystem::create_directories(tempSaveFolder);
 
 	RG_LOG("Saving to folder " << saveFolder << "...");
-	SaveStats(saveFolder / STATS_FILE_NAME);
-	ppo->SaveTo(saveFolder);
+	SaveStats(tempSaveFolder / STATS_FILE_NAME);
+	ppo->SaveTo(tempSaveFolder);
+	if (std::filesystem::exists(saveFolder))
+		std::filesystem::remove_all(saveFolder);
+	std::filesystem::rename(tempSaveFolder, saveFolder);
 
 	// Remove old checkpoints
 	if (config.checkpointsToKeep != -1) {
@@ -466,6 +494,14 @@ void GGL::Learner::Start() {
 	RG_LOG("Learner::Start():");
 	RG_LOG("\tObs size: " << obsSize);
 	RG_LOG("\tAction amount: " << numActions);
+	if (config.maxTotalTimesteps > 0 && totalTimesteps >= config.maxTotalTimesteps) {
+		RG_LOG("Training target already reached at " << totalTimesteps << " timesteps.");
+		return;
+	}
+
+	const auto previousSigInt = std::signal(SIGINT, HandleTrainingStopSignal);
+	const auto previousSigTerm = std::signal(SIGTERM, HandleTrainingStopSignal);
+	gTrainingStopSignal = 0;
 
 	if (render)
 		RG_LOG("\t(Render mode enabled)");
@@ -476,6 +512,7 @@ void GGL::Learner::Start() {
 		StartQuitKeyThread(saveQueued, keyPressThread);
 
 		ExperienceBuffer experience = ExperienceBuffer(config.randomSeed, torch::kCPU);
+		int64_t iterationsThisRun = 0;
 
 		int numPlayers = envSet->state.numPlayers;
 
@@ -836,6 +873,7 @@ void GGL::Learner::Start() {
 				totalTimesteps += stepsCollected;
 				report["Total Timesteps"] = totalTimesteps;
 				totalIterations++;
+				iterationsThisRun++;
 				report["Total Iterations"] = totalIterations;
 
 				if (versionMgr)
@@ -847,12 +885,17 @@ void GGL::Learner::Start() {
 					exit(0);
 				}
 
-				if (!config.checkpointFolder.empty()) {
-					if (totalTimesteps / config.tsPerSave > prevTimesteps / config.tsPerSave) {
-						// Auto-save
-						Save();
-					}
-				}
+				const bool hitCheckpointBoundary =
+					totalTimesteps / config.tsPerSave > prevTimesteps / config.tsPerSave;
+				const bool reachedTimestepLimit = config.maxTotalTimesteps > 0
+					&& totalTimesteps >= config.maxTotalTimesteps;
+				const bool reachedIterationLimit = config.maxIterations > 0
+					&& iterationsThisRun >= config.maxIterations;
+				const bool requestedStop = gTrainingStopSignal != 0;
+				const bool shouldStop = reachedTimestepLimit || reachedIterationLimit || requestedStop;
+
+				if (!config.checkpointFolder.empty() && (hitCheckpointBoundary || shouldStop))
+					Save();
 
 				report.Finish();
 
@@ -863,6 +906,7 @@ void GGL::Learner::Start() {
 					{
 						"Average Step Reward",
 						"Policy Entropy",
+						"SB3 Clip Fraction",
 						"KL Div Loss",
 						"First Accuracy",
 						"",
@@ -879,15 +923,25 @@ void GGL::Learner::Start() {
 						"-Env Step Time",
 						"Consumption Time",
 						"-GAE Time",
-						"-PPO Learn Time"
+						"-PPO Learn Time",
 						"",
 						"Collected Timesteps",
 						"Total Timesteps",
-						"Total Iterations"
+						"Total Iterations",
+						"Rating/1v1",
+						"Rating/2v2",
+						"Training/TeamSpirit"
 					}
 				);
+
+				if (shouldStop) {
+					RG_LOG("Training stopped cleanly at " << totalTimesteps << " timesteps.");
+					break;
+				}
 			}
 		}
+		std::signal(SIGINT, previousSigInt);
+		std::signal(SIGTERM, previousSigTerm);
 		
 	} catch (std::exception& e) {
 		RG_ERR_CLOSE("Exception thrown during main learner loop: " << e.what());

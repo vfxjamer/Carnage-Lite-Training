@@ -34,6 +34,11 @@ namespace GGL {
 		// Set to zero to just use timestepsPerIteration
 		int64_t tsPerSave = 1'000'000;
 
+		// Optional clean stops used by staged training and local smoke runs.
+		// Zero leaves the corresponding limit disabled.
+		int64_t maxTotalTimesteps = 0;
+		int64_t maxIterations = 0;
+
 		int64_t randomSeed = -1; // Set to -1 to use the current time
 		int checkpointsToKeep = 8; // Checkpoint storage limit before old checkpoints are deleted, set to -1 to disable
 		LearnerDeviceType deviceType = LearnerDeviceType::AUTO; // Auto will use your CUDA GPU if available

@@ -2,11 +2,16 @@
 #include <nlohmann/json.hpp>
 
 #include <GigaLearnCPP/Util/Utils.h>
+#include "TrainingSchedule.h"
 
 #include <RLGymCPP/StateSetters/FuzzedKickoffState.h>
 #include <RLGymCPP/TerminalConditions/GoalScoreCondition.h>
 
 #include <private/GigaLearnCPP/PPO/PPOLearner.h>
+
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 
 using namespace nlohmann;
 
@@ -85,12 +90,15 @@ void GGL::PolicyVersionManager::SaveVersions() {
 		if (allSavedTimesteps.contains(version.timesteps))
 			continue;
 		auto versionSaveFolder = saveFolder / std::to_string(version.timesteps);
-		std::filesystem::create_directories(versionSaveFolder);
+		auto tempVersionSaveFolder = saveFolder / (std::to_string(version.timesteps) + ".tmp");
+		if (std::filesystem::exists(tempVersionSaveFolder))
+			std::filesystem::remove_all(tempVersionSaveFolder);
+		std::filesystem::create_directories(tempVersionSaveFolder);
 
-		version.models.Save(versionSaveFolder, false);
+		version.models.Save(tempVersionSaveFolder, false);
 
 		{ // Save JSON
-			auto jsonPath = versionSaveFolder / "STATS.json";
+			auto jsonPath = tempVersionSaveFolder / "STATS.json";
 
 			std::ofstream fOut(jsonPath);
 			RG_ASSERT(fOut.good());
@@ -100,6 +108,8 @@ void GGL::PolicyVersionManager::SaveVersions() {
 			std::string jStr = j.dump(4);
 			fOut << jStr;
 		}
+
+		std::filesystem::rename(tempVersionSaveFolder, versionSaveFolder);
 	}
 }
 
@@ -153,7 +163,7 @@ void GGL::PolicyVersionManager::SortVersions() {
 
 /////////////////////////////////////////////////////////////////////
 
-void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report) {
+void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report, int64_t totalTimesteps) {
 	RG_NO_GRAD;
 	
 	auto fnUpdateRatings = [this](SkillRating& winner, SkillRating& loser, RLGC::GameState& state) {
@@ -178,7 +188,16 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 		newTeam = skill.prevNewTeam;
 		totalSimTime = skill.prevSimTime;
 	} else {
-		oldVersionIndex = Math::RandInt(0, versions.size());
+		std::vector<int> olderVersionIndices;
+		for (int i = 0; i < versions.size(); i++) {
+			if (versions[i].timesteps < static_cast<uint64_t>(totalTimesteps))
+				olderVersionIndices.push_back(i);
+		}
+		if (olderVersionIndices.empty()) {
+			RG_LOG("Skipping checkpoint ELO: no older policy version is available.");
+			return;
+		}
+		oldVersionIndex = olderVersionIndices[Math::RandInt(0, olderVersionIndices.size())];
 		newTeam = (Team)Math::RandInt(0, 2);
 		totalSimTime = 0;
 
@@ -272,19 +291,27 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 			renderSender->Send(skill.envSet->state.gameStates[0]);
 	}
 
-	for (auto& pair : skill.curRatings.data) {
-		float prevRating = prevCurRatings.GetRating(pair.first, skill.config.initialRating);
-		float delta = pair.second - prevRating;
+	const std::string modeName = SkillRating::GetModeName(skill.envSet->state.gameStates[0]);
+	const float currentRating = skill.curRatings.GetRating(modeName, skill.config.initialRating);
+	const float previousRating = prevCurRatings.GetRating(modeName, skill.config.initialRating);
+	RG_LOG("Checkpoint ELO @ " << totalTimesteps << " timesteps (" << modeName << "): "
+		<< currentRating << " (" << (currentRating - previousRating >= 0 ? '+' : '-')
+		<< std::abs(currentRating - previousRating) << ")");
+	report["Rating/" + modeName] = currentRating;
 
-		std::stringstream ratingLine;
-		ratingLine << " > " << pair.first << " = " << prevRating;
-		if (delta != 0)
-			ratingLine << " (" << (delta >= 0 ? '+' : '-') << abs(delta) << ")";
-
-		RG_LOG(" > " << ratingLine.str());
-
-		report["Rating/" + pair.first] = pair.second;
+	for (auto& version : versions) {
+		if (version.timesteps == static_cast<uint64_t>(totalTimesteps)) {
+			version.ratings = skill.curRatings;
+			break;
+		}
 	}
+
+	const auto eloPath = saveFolder.parent_path() / "elo_history.csv";
+	const bool writeHeader = !std::filesystem::exists(eloPath) || std::filesystem::file_size(eloPath) == 0;
+	std::ofstream eloOut(eloPath, std::ios::app);
+	if (writeHeader)
+		eloOut << "total_timesteps,mode,elo\n";
+	eloOut << totalTimesteps << ',' << modeName << ',' << std::setprecision(8) << currentRating << '\n';
 
 	if (skill.curGoals < skill.envSet->arenas.size() && totalSimTime < skill.config.maxSimTime) {
 		// Not enough goals were scored, we will force a continuation where the same models keep playing from the end position
@@ -300,27 +327,64 @@ void GGL::PolicyVersionManager::RunSkillMatches(PPOLearner* ppo, Report& report)
 }
 
 void GGL::PolicyVersionManager::OnIteration(struct PPOLearner* ppo, Report& report, int64_t totalTimesteps, int64_t prevTotalTimesteps) {
-	if ((totalTimesteps / tsPerVersion > prevTotalTimesteps / tsPerVersion) || (prevTotalTimesteps == 0)) {
+	const bool savedNewVersion = Carnage::Training::CrossedCheckpoint(
+		static_cast<uint64_t>(prevTotalTimesteps),
+		static_cast<uint64_t>(totalTimesteps),
+		static_cast<uint64_t>(tsPerVersion)
+	);
+	if (savedNewVersion) {
 		// Save version
 		AddVersion(ppo->GetPolicyModels(), totalTimesteps);
 	}
 
 	if (skill.config.enabled) {
-		skill.iterationsSinceRan++;
-		if (skill.iterationsSinceRan >= skill.config.updateInterval && !versions.empty()) {
-			skill.iterationsSinceRan = 0;
-			RunSkillMatches(ppo, report);
+		if (skill.config.updateOnNewVersion) {
+			if (savedNewVersion && versions.size() > 1)
+				RunSkillMatches(ppo, report, totalTimesteps);
+		} else {
+			skill.iterationsSinceRan++;
+			if (skill.iterationsSinceRan >= skill.config.updateInterval && !versions.empty()) {
+				skill.iterationsSinceRan = 0;
+				RunSkillMatches(ppo, report, totalTimesteps);
+			}
 		}
 	}
 }
 
 void GGL::PolicyVersionManager::AddRunningStatsToJSON(nlohmann::json& json) {
-	if (skill.config.enabled)
+	if (skill.config.enabled) {
 		json["skill_ratings"] = skill.curRatings.ToJSON();
+		nlohmann::json versionRatings = nlohmann::json::object();
+		for (const auto& version : versions)
+			versionRatings[std::to_string(version.timesteps)] = version.ratings.ToJSON();
+		json["policy_version_ratings"] = std::move(versionRatings);
+	}
 }
 
 void GGL::PolicyVersionManager::LoadRunningStatsFromJSON(const nlohmann::json& json) {
-	if (skill.config.enabled)
+	if (skill.config.enabled) {
 		if (json.contains("skill_ratings"))
 			skill.curRatings.ReadFromJSON(json["skill_ratings"]);
+		if (json.contains("policy_version_ratings") && json["policy_version_ratings"].is_object())
+			skill.pendingVersionRatings = json["policy_version_ratings"];
+		else
+			skill.pendingVersionRatings = nlohmann::json::object();
+	}
+}
+
+bool GGL::PolicyVersionManager::HasPendingVersionRating(uint64_t timesteps) const {
+	return skill.pendingVersionRatings.is_object()
+		&& skill.pendingVersionRatings.contains(std::to_string(timesteps));
+}
+
+void GGL::PolicyVersionManager::ApplyPendingVersionRatings() {
+	if (!skill.config.enabled || !skill.pendingVersionRatings.is_object())
+		return;
+
+	for (auto& version : versions) {
+		const auto key = std::to_string(version.timesteps);
+		if (skill.pendingVersionRatings.contains(key))
+			version.ratings.ReadFromJSON(skill.pendingVersionRatings[key]);
+	}
+	skill.pendingVersionRatings = nlohmann::json::object();
 }

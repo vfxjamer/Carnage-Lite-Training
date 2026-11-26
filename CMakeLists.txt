@@ -43,6 +43,9 @@ find_package(Torch REQUIRED)
 add_subdirectory(thirdparty/GigaLearnCPP-Leak/GigaLearnCPP)
 add_subdirectory(thirdparty/GigaLearnCPP-Leak/RLBotCPP)
 
+# Carnage's fixed training schedule is also used by the bundled skill tracker.
+target_include_directories(GigaLearnCPP PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 file(GLOB CARNAGE_SRC "src/*.cpp" "src/*.h")
 
 add_executable(Carnage ${CARNAGE_SRC})
