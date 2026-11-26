@@ -140,7 +140,7 @@ namespace {
 			if (!Carnage::Training::IsNumericCheckpointName(name))
 				continue;
 			try {
-				latest = std::max(latest, std::stoull(name));
+				latest = std::max(latest, static_cast<uint64_t>(std::stoull(name)));
 			} catch (...) {
 				// Non-numeric subdirectories, such as policy_versions, are not checkpoints.
 			}
