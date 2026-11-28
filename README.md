@@ -23,7 +23,7 @@ The phase reward weights are:
 | TouchBall | 50 | 5 | |
 | SpeedTowardBall | 5 | 1 | |
 | FaceBall | 1 | 0.2 | |
-| InAir | 0.15 | 0.1 | |
+| InAir | 0.15 | 0.3 | |
 | BallVelocityTowardGoal | — | 3 | |
 | GoalAndConcede | — | 30 | A goal gives +30 to the scoring team and −24 to the conceding team. |
 
