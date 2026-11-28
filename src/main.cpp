@@ -52,7 +52,7 @@ namespace {
 	PhaseSettings GetPhaseSettings(int phase) {
 		switch (phase) {
 		case 1: return { 50'000, 25'000, 2e-4f, 0.99f };
-		case 2: return { 100'000, 25'000, 1e-4f, 0.99f };
+		case 2: return { 100'000, 25'000, 1e-4f, 0.993f };
 		case 3: return { 150'000, 50'000, 1e-4f, 0.995f };
 		case 4: return { 300'000, 50'000, 0.8e-4f, 0.998f };
 		case 5: return { 400'000, 50'000, 0.8e-4f, 0.998f };
