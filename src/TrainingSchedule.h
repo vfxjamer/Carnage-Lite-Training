@@ -39,7 +39,7 @@ namespace Carnage::Training {
 		if (phase == 1)
 			return { 50.f, 5.f, 1.f, 0.15f, 0.f, 0.f, -0.8f };
 		if (phase == 2)
-			return { 5.f, 1.f, 0.2f, 0.3f, 3.f, 30.f, -0.8f };
+			return { 0.25f, 1.f, 0.2f, 0.3f, 3.f, 30.f, -0.8f };
 		return {};
 	}
 
