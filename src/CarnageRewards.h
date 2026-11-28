@@ -6,7 +6,9 @@
 #include "RewardEpisodeMetrics.h"
 
 #include <cmath>
+#include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -16,6 +18,31 @@ namespace RLGC {
 		float GetReward(const Player& player, const GameState& state, bool) override {
 			const Vec dirToBall = (state.ball.pos - player.pos).Normalized();
 			return RS_MAX(0, dirToBall.Dot(player.vel)) / CommonValues::CAR_MAX_SPEED;
+		}
+	};
+
+	class TouchBallTickDecayReward : public Reward {
+		std::unordered_map<std::uint32_t, std::uint64_t> previousTouchTicks;
+
+	public:
+		void Reset(const GameState&) override {
+			previousTouchTicks.clear();
+		}
+
+		float GetReward(const Player& player, const GameState&, bool) override {
+			if (!player.ballTouchedStep)
+				return 0.f;
+
+			const std::uint64_t touchTick = player.ballHitInfo.tickCountWhenHit;
+			const auto previousTouch = previousTouchTicks.find(player.carId);
+			if (previousTouch == previousTouchTicks.end()) {
+				previousTouchTicks.emplace(player.carId, touchTick);
+				return 1.f;
+			}
+
+			const auto ticksSincePreviousTouch = touchTick - previousTouch->second;
+			previousTouch->second = touchTick;
+			return RS_CLAMP(static_cast<float>(ticksSincePreviousTouch) / 120.f, 0.f, 1.f);
 		}
 	};
 

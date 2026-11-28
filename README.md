@@ -20,14 +20,16 @@ The phase reward weights are:
 
 | Reward | Phase 1 | Phase 2 | Details |
 | --- | ---: | ---: | --- |
-| TouchBall | 50 | 5 | |
+| TouchBall | 50 | 0.25 | Phase 2 uses per-player tick decay (details below). |
 | SpeedTowardBall | 5 | 1 | |
 | FaceBall | 1 | 0.2 | |
 | InAir | 0.15 | 0.3 | |
 | BallVelocityTowardGoal | — | 3 | |
 | GoalAndConcede | — | 30 | A goal gives +30 to the scoring team and −24 to the conceding team. |
 
-The source contains settings for later phases, but the executable currently rejects phases above 2.
+The source contains settings for later phases, but the executable currently rejects phases above 2. This update changes only the Phase 2 TouchBall behavior; Phase 1 TouchBall and the other reward functions retain their configured behavior.
+
+In Phase 2, each player's first touch in an episode awards +0.25. Each later touch awards `+0.25 × clamp(physics ticks since that player's previous touch / 120, 0, 1)`. A touch is counted once per player per decision step, and tracking resets each episode. The Phase 2 TouchBall weight is 0.25, so these are the effective reward amounts.
 
 ## PPO model and environment
 

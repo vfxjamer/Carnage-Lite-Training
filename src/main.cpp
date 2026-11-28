@@ -76,7 +76,7 @@ namespace {
 		}
 
 		if (phase == 2) {
-			add("TouchBall", new TouchBallReward(), earlyWeights.touchBall);
+			add("TouchBall", new TouchBallTickDecayReward(), earlyWeights.touchBall);
 			add("SpeedTowardBall", new SpeedTowardBallReward(), earlyWeights.speedTowardBall);
 			add("FaceBall", new FaceBallReward(), earlyWeights.faceBall);
 			add("InAir", new AirReward(), earlyWeights.inAir);
