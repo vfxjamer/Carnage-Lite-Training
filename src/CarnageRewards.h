@@ -2,8 +2,6 @@
 
 #include <RLGymCPP/Rewards/CommonRewards.h>
 #include <RLGymCPP/Rewards/Reward.h>
-#include <RLGymCPP/Rewards/RewardWrapper.h>
-#include <RLGymCPP/Rewards/ZeroSumReward.h>
 
 #include "RewardEpisodeMetrics.h"
 
@@ -83,10 +81,6 @@ namespace RLGC {
 
 		std::string GetName() override {
 			return name;
-		}
-
-		Reward* Child() const {
-			return child;
 		}
 
 		Carnage::Metrics::EpisodeRewardStats TakeEpisodeStats() {

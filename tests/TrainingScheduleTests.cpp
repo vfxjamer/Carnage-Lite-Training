@@ -1,6 +1,5 @@
 #include "TrainingSchedule.h"
 
-#include <cmath>
 #include <iostream>
 
 #define CHECK(expression) do { \
@@ -36,14 +35,6 @@ int main() {
 	CHECK(IsNumericCheckpointName("5000000"));
 	CHECK(!IsNumericCheckpointName("5000000.tmp"));
 	CHECK(!IsNumericCheckpointName(""));
-
-	CHECK(TeamSpiritAt(kOneVOneTimesteps, kOneVOneTimesteps) == 0.0f);
-	CHECK(std::abs(TeamSpiritAt(kOneVOneTimesteps + kTwoVTwoTimesteps / 2,
-		kOneVOneTimesteps) - 0.5f) < 0.0001f);
-	CHECK(TeamSpiritAt(kOneVOneTimesteps + kTwoVTwoTimesteps,
-		kOneVOneTimesteps) == 1.0f);
-	CHECK(TeamSpiritAt(kOneVOneTimesteps + kTwoVTwoTimesteps * 2,
-		kOneVOneTimesteps) == 1.0f);
 
 	CHECK(!CrossedCheckpoint(0, kCheckpointTimesteps - 1, kCheckpointTimesteps));
 	CHECK(CrossedCheckpoint(kCheckpointTimesteps - 1,

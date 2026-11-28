@@ -60,18 +60,16 @@ namespace {
 		}
 	}
 
-	std::vector<WeightedReward> MakeRewards(int phase, float teamSpirit) {
+	std::vector<WeightedReward> MakeRewards(int phase) {
 		std::vector<WeightedReward> result;
 		const auto earlyWeights = Carnage::Training::GetEarlyPhaseRewardWeights(phase);
-		auto add = [&](const char* name, Reward* reward, float weight, bool zeroSum = false) {
-			if (zeroSum)
-				reward = new ZeroSumReward(reward, teamSpirit);
+		auto add = [&](const char* name, Reward* reward, float weight) {
 			result.emplace_back(new EpisodeMetricReward(name, reward, weight), weight);
 		};
 
 		if (phase == 1) {
 			add("TouchBall", new TouchBallReward(), earlyWeights.touchBall);
-			add("SpeedTowardBall", new SpeedTowardBallReward(), earlyWeights.speedTowardBall, true);
+			add("SpeedTowardBall", new SpeedTowardBallReward(), earlyWeights.speedTowardBall);
 			add("FaceBall", new FaceBallReward(), earlyWeights.faceBall);
 			add("InAir", new AirReward(), earlyWeights.inAir);
 			return result;
@@ -79,7 +77,7 @@ namespace {
 
 		if (phase == 2) {
 			add("TouchBall", new TouchBallReward(), earlyWeights.touchBall);
-			add("SpeedTowardBall", new SpeedTowardBallReward(), earlyWeights.speedTowardBall, true);
+			add("SpeedTowardBall", new SpeedTowardBallReward(), earlyWeights.speedTowardBall);
 			add("FaceBall", new FaceBallReward(), earlyWeights.faceBall);
 			add("InAir", new AirReward(), earlyWeights.inAir);
 			add("BallVelocityTowardGoal", new VelocityBallToGoalReward(), earlyWeights.ballVelocityTowardGoal);
@@ -89,16 +87,16 @@ namespace {
 
 		const bool phase3 = phase == 3;
 		const bool phase4 = phase == 4;
-		add("StrongTouch", new StrongTouchReward(), phase3 ? 15.f : phase4 ? 10.f : 8.f, true);
-		add("SpeedTowardBall", new SpeedTowardBallReward(), phase3 ? 0.3f : 0.2f, true);
+		add("StrongTouch", new StrongTouchReward(), phase3 ? 15.f : phase4 ? 10.f : 8.f);
+		add("SpeedTowardBall", new SpeedTowardBallReward(), phase3 ? 0.3f : 0.2f);
 		add("FaceBall", new FaceBallReward(), phase3 ? 0.03f : 0.02f);
 		add("InAir", new AirReward(), phase3 ? 0.02f : 0.01f);
-		add("BallVelocityTowardGoal", new VelocityBallToGoalReward(), 1.5f, phase4 || phase == 5);
+		add("BallVelocityTowardGoal", new VelocityBallToGoalReward(), 1.5f);
 		add("GoalAndConcede", new GoalReward(-0.8f), 60.f);
 		add("SaveBoost", new SaveBoostReward(0.5f), 0.2f);
-		add("BoostPickup", new PickupBoostReward(), 3.f, true);
+		add("BoostPickup", new PickupBoostReward(), 3.f);
 		add("AirTouch", new AirTouchReward(), phase3 || phase4 ? 25.f : 15.f);
-		add("DemoOrBump", new DemoBumpReward(), 10.f, true);
+		add("DemoOrBump", new DemoBumpReward(), 10.f);
 		return result;
 	}
 
@@ -236,19 +234,6 @@ namespace {
 		return startStep;
 	}
 
-	void UpdateTeamSpirit(Learner* learner, float teamSpirit) {
-		for (auto& arenaRewards : learner->envSet->rewards) {
-			for (auto& weighted : arenaRewards) {
-				auto* metricsReward = dynamic_cast<EpisodeMetricReward*>(weighted.reward);
-				if (!metricsReward)
-					continue;
-				auto* zeroSum = dynamic_cast<ZeroSumReward*>(metricsReward->Child());
-				if (zeroSum)
-					zeroSum->teamSpirit = teamSpirit;
-			}
-		}
-	}
-
 	void AppendRewardEpisodeMetrics(
 		Learner* learner,
 		const GameState&,
@@ -318,12 +303,6 @@ namespace {
 		}
 
 		runtime.countedTimesteps += collectedTimesteps;
-		if (runtime.mode == Carnage::Training::GameMode::TwoVTwo) {
-			const float teamSpirit = Carnage::Training::TeamSpiritAt(
-				runtime.countedTimesteps, runtime.modeStartTimesteps);
-			UpdateTeamSpirit(learner, teamSpirit);
-			report.AddAvg("Training/TeamSpirit", teamSpirit);
-		}
 	}
 }
 
@@ -398,19 +377,15 @@ int main(int argc, char* argv[]) {
 	runtime.countedTimesteps = latestCheckpoint;
 	runtime.rewardMetricsPath = std::filesystem::path(saveDir) / "reward_episode_metrics.csv";
 
-	const float initialTeamSpirit = runtime.mode == Carnage::Training::GameMode::TwoVTwo
-		? Carnage::Training::TeamSpiritAt(latestCheckpoint, runtime.modeStartTimesteps)
-		: 0.f;
 	const int playersPerTeam = runtime.mode == Carnage::Training::GameMode::TwoVTwo ? 2 : 1;
 
 	RG_LOG("Carnage-Lite (8.9M)");
 	RG_LOG("Mode: " << ModeName(runtime.mode) << " | phase: " << phase
-		<< " | checkpoint step: " << latestCheckpoint
-		<< " | initial team spirit: " << initialTeamSpirit);
+		<< " | checkpoint step: " << latestCheckpoint);
 
 	RocketSim::Init(meshesPath);
 
-	auto envCreateFunc = [phase, playersPerTeam, initialTeamSpirit](int) -> EnvCreateResult {
+	auto envCreateFunc = [phase, playersPerTeam](int) -> EnvCreateResult {
 		EnvCreateResult result = {};
 		result.arena = Arena::Create(GameMode::SOCCAR);
 		for (int i = 0; i < playersPerTeam; i++) {
@@ -424,7 +399,7 @@ int main(int argc, char* argv[]) {
 			new NoTouchCondition(10),
 			new GoalScoreCondition()
 		};
-		result.rewards = MakeRewards(phase, initialTeamSpirit);
+		result.rewards = MakeRewards(phase);
 		return result;
 	};
 

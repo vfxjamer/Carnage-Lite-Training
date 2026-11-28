@@ -56,17 +56,6 @@ namespace Carnage::Training {
 		return totalTimesteps < kOneVOneTimesteps ? GameMode::OneVOne : GameMode::TwoVTwo;
 	}
 
-	inline float TeamSpiritAt(std::uint64_t totalTimesteps, std::uint64_t twoVTwoStartTimesteps) {
-		if (totalTimesteps <= twoVTwoStartTimesteps)
-			return 0.0f;
-
-		const auto elapsed = totalTimesteps - twoVTwoStartTimesteps;
-		if (elapsed >= kTwoVTwoTimesteps)
-			return 1.0f;
-
-		return static_cast<float>(elapsed) / static_cast<float>(kTwoVTwoTimesteps);
-	}
-
 	constexpr bool CrossedCheckpoint(
 		std::uint64_t previousTimesteps,
 		std::uint64_t totalTimesteps,
