@@ -24,7 +24,7 @@ int main() {
 	CHECK(phaseOneRewards.touchBall == 50.f);
 	CHECK(phaseOneRewards.goalWeight == 0.f);
 	const auto phaseTwoRewards = GetEarlyPhaseRewardWeights(2);
-	CHECK(phaseTwoRewards.touchBall == 0.25f);
+	CHECK(phaseTwoRewards.touchBall == 1.f);
 	CHECK(phaseTwoRewards.goalWeight == 30.f);
 	CHECK(phaseTwoRewards.concedeScale == -0.8f);
 	CHECK(phaseTwoRewards.goalWeight * phaseTwoRewards.concedeScale == -24.f);
