@@ -1,80 +1,89 @@
-# Carnage-Lite (1.2M)
+# Carnage-Lite Training
 
-Fresh-start Rocket League PPO trainer built with the bundled GigaLearnCPP and RLGymCPP code. No weights are imported from the earlier Carnage model.
+This repository builds a C++ Rocket League PPO trainer using the bundled GigaLearnCPP and RLGymCPP code. The current training settings are defined in `src/main.cpp` and `src/TrainingSchedule.h`; the Colab launcher is `Carnage_colab.ipynb`.
 
-## Training schedule
+## Current training run
 
-- This export trains in 1v1, accepts Phase 1 or Phase 2, and targets 1 billion total timesteps. It stops at the first PPO iteration boundary at or beyond that target. Phase selection remains manual after reviewing gameplay and metrics. The rough allocations are 0.1B for Phase 1 and 0.9B for Phase 2.
-- Phases 3–5 and the planned 100B 1v1 / 20B 2v2 segment are paused for this export. The trainer rejects later phases and 2v2 until they are enabled in a future update.
-- The observation builder is configured for two teammates from the start. Tick skip is 8 and action delay is 7.
-- PPO clip range is GigaLearnCPP's 0.2 default. The trainer reports `SB3 Clip Fraction`; adjust the phase learning rate with `--policy-lr` if you decide to tune toward the guide's approximate 0.08 target. There is no automatic LR controller.
+- The executable accepts Phase 1 or Phase 2. Phase selection is manual; it does not advance phases automatically.
+- Training is configured for 1v1. The current build rejects 2v2. The default `--mode auto` selects 2v2 after a checkpoint reaches 100 billion timesteps, so use `--mode 1v1` to keep it in 1v1.
+- Training stops at 1 billion total timesteps by default. `--max-steps` can set a lower cap; requests above 1 billion are capped at 1 billion.
+- The trainer loads the newest numbered checkpoint under its save directory when one exists. Use an empty save directory to start without a checkpoint.
 
-| Phase | Timesteps per iteration | Minibatch | Policy / critic LR | Gamma |
+## Enabled phase settings
+
+| Phase | Timesteps per iteration and batch | Minibatch | Policy and critic learning rate | Gamma |
 | --- | ---: | ---: | ---: | ---: |
-| 1 | 50,000 | 25,000 | 2e-4 | 0.99 |
-| 2 | 100,000 | 25,000 | 1e-4 | 0.99 |
-| 3 | 150,000 | 50,000 | 1e-4 | 0.995 |
-| 4 | 300,000 | 50,000 | 0.8e-4 | 0.998 |
-| 5 | 400,000 | 50,000 | 0.8e-4 | 0.998 |
+| 1 | 50,000 | 25,000 | 0.0002 | 0.99 |
+| 2 | 100,000 | 25,000 | 0.0001 | 0.99 |
 
-Only Phases 1 and 2 are enabled in this export. The remaining rows are retained as later-stage settings. Advance manually when the bot passes the behavior check; the 0.1B / 0.9B allocations are estimates:
+The phase reward weights are:
 
-| Active reward | Phase 1 weight | Phase 2 weight | Notes |
+| Reward | Phase 1 | Phase 2 | Details |
 | --- | ---: | ---: | --- |
 | TouchBall | 50 | 5 | |
-| SpeedTowardBall | 5 | 1 | Zero-sum wrapper |
+| SpeedTowardBall | 5 | 1 | |
 | FaceBall | 1 | 0.2 | |
 | InAir | 0.15 | 0.1 | |
 | BallVelocityTowardGoal | — | 3 | |
-| GoalAndConcede | — | 30 | Scoring team +30; conceding team −24 |
+| GoalAndConcede | — | 30 | A goal gives +30 to the scoring team and −24 to the conceding team. |
 
-The later behavior checks are:
+The source contains settings for later phases, but the executable currently rejects phases above 2.
 
-| Phase | Move on after the bot… |
+## PPO model and environment
+
+| Setting | Value |
 | --- | --- |
-| 1 | hits the ball often and still jumps |
-| 2 | regularly pushes the ball toward the opponent's net |
-| 3 | takes boost, makes saves, and sometimes connects with aerials |
-| 4 | dribbles, flicks, and wins challenges |
-| 5 | continues refining; compare each new checkpoint's ELO with older versions |
+| Policy hidden layers | `[2048, 2048, 1024]` |
+| Critic hidden layers | `[2048, 2048, 1024]` |
+| Activation and normalization | ReLU with layer normalization |
+| Optimizer | Adam |
+| PPO epochs | 1 |
+| Entropy scale | 0.01 |
+| Clip range | 0.2 |
+| GAE gamma | 0.99 for both enabled phases |
+| GAE lambda | 0.95 |
+| Return standardization | Enabled |
+| Random seed | 123 |
 
-The policy and critic each use `[512, 512, 512]`, two PPO epochs, entropy scale 0.01, and default clip range 0.2. GigaLearnCPP omits `SB3 Clip Fraction` on its first PPO iteration; it appears in subsequent iteration reports. Experience-buffer sizing is not exposed by this version, so no unsupported buffer option is added.
+The policy and critic use the same learning rate. The optional `--policy-lr` argument overrides both.
 
-## Local Windows build and smoke run
+The environment uses `DefaultObsPadded(2)`, tick skip 8, and action delay 7. Phase 1 uses random starting states. Phase 2 uses random states 75% of the time and kickoff states 25% of the time. Episodes end on a goal or `NoTouchCondition(10)`.
 
-Install CMake, Visual Studio C++ build tools, and a Python environment with PyTorch. From this folder:
+The local executable defaults to 256 games and CPU. The Colab notebook overrides these with 2,048 games and CUDA.
+
+## Build and run on Windows
+
+Install CMake 3.18 or later, a C++20 compiler such as Visual Studio C++ Build Tools, and Python with PyTorch installed. CMake enables CUDA support when it finds a CUDA toolkit; without one it builds a CPU-only executable.
 
 ```powershell
-cmake -S . -B build/windows-cpu -DCMAKE_BUILD_TYPE=Release
-cmake --build build/windows-cpu --config Release -j 8
+cmake -S . -B build/windows -DCMAKE_BUILD_TYPE=Release
+cmake --build build/windows --config Release --parallel 8
 ```
 
-The configured build uses CPU because no CUDA toolkit was detected. To run the bounded one-iteration smoke check:
+Run Phase 1 on CPU:
 
 ```powershell
-build/windows-cpu/Release/Carnage.exe collision_meshes --device cpu --games 8 --phase 1 --max-iterations 1 --save-dir build/smoke-checkpoints
+build/windows/Release/Carnage.exe collision_meshes --device cpu --mode 1v1 --phase 1 --games 256 --save-dir build/checkpoints
 ```
 
-For regular local training, omit `--max-iterations`. Resume is automatic from the highest numeric checkpoint folder in `--save-dir`.
+Choose Phase 2 manually after reviewing the current training results by changing `--phase 1` to `--phase 2`. Use `--policy-lr` only when you want to override the configured learning rate for both policy and critic.
 
-## Colab
+The trainer accepts `--device cpu|cuda|auto`, `--mode auto|1v1`, `--phase 1|2`, `--games N`, `--max-steps N`, `--max-iterations N`, `--policy-lr N`, and `--save-dir PATH`. Checkpoints are stored in numbered subdirectories of the save directory.
 
-1. Use the public [Carnage-Lite-Training repository](https://github.com/vfxjamer/Carnage-Lite-Training). Its HTTPS URL is already set in `REPO_URL` in `Carnage_colab.ipynb`.
-2. Open the notebook in Colab, select a T4 GPU runtime, then run cells from top to bottom. It mounts Drive at `MyDrive/Carnage-Lite`, restores checkpoints, builds, and trains for up to about 5.4 hours.
-3. Set `PHASE` to 1 or 2 in the notebook after reviewing gameplay and logs. Training targets 1B total timesteps and stops at an iteration boundary after reaching it. The process receives SIGTERM at the session boundary, saves at an iteration boundary, syncs checkpoints and CSVs to Drive, then exits.
-4. On later sessions the notebook clones/pulls the repo and resumes the latest synced checkpoint. Drive keeps the latest eight numbered training checkpoints and up to 32 policy versions; a dated backup of the latest checkpoint is created once per day.
+## Google Colab
 
-No W&B key, replay file, or other credential is required. Training logs go to the notebook output and `build/train.log`.
+Use `Carnage_colab.ipynb` with a GPU runtime; the notebook recommends a T4 and stops if CUDA is unavailable. Its first settings cell defaults to Phase 1, 2,048 games, no learning-rate override, and a 5.4-hour session. It clones or fast-forward-pulls this repository, mounts Drive at `MyDrive/Carnage-Lite`, restores saved checkpoints, builds the CUDA trainer, and launches it with `--device cuda` and `--mode auto`.
 
-## Outputs
+The notebook syncs complete checkpoints, policy versions, and CSV files to Drive every 60 seconds. Near the session deadline it requests a graceful trainer shutdown and waits up to 120 seconds before forcing an exit. It retries nonzero trainer exits with backoff and creates one daily checkpoint backup.
 
-- `build/checkpoints/<timesteps>/`: learner and optimizer checkpoint, retained locally for resume.
-- `build/checkpoints/policy_versions/`: self-play policy snapshots used by the ELO tracker.
-- `build/checkpoints/elo_history.csv`: one mode-specific ELO row each time a new checkpoint is evaluated. Ratings start at 0 and are relative self-play ratings; no rank labels are inferred.
-- `build/checkpoints/reward_episode_metrics.csv`: per-reward Blue/Orange means per player-step, episode totals per player, and each side's share of absolute reward across the episode.
+## Checkpoints and reports
 
-ELO match batches run against older policy versions through GigaLearnCPP's built-in skill tracker. This export records 1v1 ratings; the planned 2v2 mode is paused. External anchors such as Necto or Nexto are not wired into this trainer.
+The trainer retains up to eight numbered training checkpoints and up to 32 policy versions. It evaluates new policy versions with the built-in deterministic skill tracker, starting at rating 0.
 
-## Validation
+- `<save-dir>/<timesteps>/`: learner checkpoints used to resume training.
+- `<save-dir>/policy_versions/`: policy snapshots used by the skill tracker.
+- `<save-dir>/elo_history.csv`: self-play rating history.
+- `<save-dir>/reward_episode_metrics.csv`: per-reward Blue and Orange means per player-step, episode totals per player, and each side's share of absolute reward.
+- Colab writes the trainer log to `build/train.log` and stores Drive copies under `MyDrive/Carnage-Lite/checkpoints`.
 
-The schedule helper test is under `tests/` and builds independently with CMake. The Windows CPU build and the bounded one-iteration training smoke run should both complete before uploading the source.
+The Colab runtime settings and local defaults differ where noted above; the PPO architecture, enabled phases, reward weights, and phase learning rates come from the C++ training code.
